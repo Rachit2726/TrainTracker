@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Train Map Snapshot</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+
+<body style="margin:0">
+    <div style="padding:10px">
+        Train Number: <input id="trainNo" value="12321">
+        Journey Date: <input type="date" id="journeyDate" value="2025-08-26">
+        <button onclick="loadTrain()">Show Route</button>
+    </div>
+    <div id="map" style="width:100%; height:90vh;"></div>
+
+    <script>
+        let map = L.map('map').setView([22.584058, 88.340979], 6);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+
+        function loadTrain() {
+            const trainNumber = document.getElementById("trainNo").value;
+            const journeyDate = document.getElementById("journeyDate").value;
+
+            fetch(`/api/train/${trainNumber}?journeyDate=${journeyDate}`)
+                .then(res => res.json())
+                .then(data => {
+                    map.eachLayer((layer) => {
+                        if (layer instanceof L.Marker || layer instanceof L.Polyline) map.removeLayer(layer);
+                    });
+
+                    const stations = data.route;
+                    const routeCoords = [];
+
+                    stations.forEach(station => {
+                        const lat = parseFloat(station.lat);
+                        const lng = parseFloat(station.lng);
+                        routeCoords.push([lat, lng]);
+
+                        let popupText = `<b>${station.station_name}</b><br>
+                                 Arrival: ${Math.floor(station.std_min / 60)}:${station.std_min % 60}<br>
+                                 Platform: ${station.platform_number}<br>
+                                 Food: ${station.food_available}<br>
+                                 Hotel: ${station.hotel_available}<br>
+                                 Hospital: ${station.hospital_available}`;
+
+                        L.marker([lat, lng]).addTo(map).bindPopup(popupText);
+                    });
+
+                    L.polyline(routeCoords, { color: 'blue' }).addTo(map);
+
+                    const currentStation = stations.find(s => s.station_name === data.currentStation);
+                    if (currentStation) {
+                        L.circleMarker([currentStation.lat, currentStation.lng], { color: 'red', radius: 8 })
+                            .addTo(map)
+                            .bindPopup(`<b>Current Station: ${data.currentStation}</b><br>
+                                Next: ${data.nextStation}<br>
+                                ETA: ${data.etaNextStation}`)
+                            .openPopup();
+                    }
+                });
+        }
+    </script>
+</body>
+
+</html>
