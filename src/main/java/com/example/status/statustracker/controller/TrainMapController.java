@@ -15,14 +15,14 @@ public class TrainMapController {
 
     @GetMapping("/")
     public String index() {
-        // Redirect to the static HTML
         return "redirect:/index.html";
     }
 
-    @GetMapping("/api/train/{trainNumber}")
+    @GetMapping("/api/train/{trainNo}")
     @ResponseBody
-    public String getTrainSnapshot(@PathVariable String trainNumber,
-            @RequestParam String journeyDate) {
-        return service.getTrainSnapshotJson(trainNumber, journeyDate);
+    public String getTrainData(
+            @PathVariable String trainNo,
+            @RequestParam String date) {
+        return service.getCombinedTrainData(trainNo, date);
     }
 }

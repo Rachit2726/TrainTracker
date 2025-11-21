@@ -2,67 +2,233 @@
 <html>
 
 <head>
-    <title>Train Map Snapshot</title>
+    <title>Train Live Tracker</title>
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background: #f0f2f5;
+        }
+
+        #topBar {
+            padding: 12px;
+            background: white;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        input,
+        button {
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        #infoPanel {
+            position: absolute;
+            top: 75px;
+            left: 10px;
+            z-index: 9999;
+            width: 260px;
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+            font-size: 14px;
+        }
+
+        .infoCard {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+        }
+    </style>
 </head>
 
-<body style="margin:0">
-    <div style="padding:10px">
-        Train Number: <input id="trainNo" value="12321">
-        Journey Date: <input type="date" id="journeyDate" value="2025-08-26">
-        <button onclick="loadTrain()">Show Route</button>
+<body>
+
+    <!-- Top Bar -->
+    <div id="topBar">
+        Train Number:
+        <input id="trainNo" value="12321">
+        Journey Date:
+        <input type="date" id="journeyDate">
+        <button onclick="loadTrain()">Load Train</button>
     </div>
+
+    <!-- Info Panel -->
+    <div id="infoPanel">
+        <div class="infoCard" id="currentCard">
+            <b>Current Station</b><br>
+            No data yet...
+        </div>
+
+        <div class="infoCard" id="nextCard">
+            <b>Next Station</b><br>
+            No data yet...
+        </div>
+    </div>
+
+    <!-- Map -->
     <div id="map" style="width:100%; height:90vh;"></div>
 
     <script>
-        let map = L.map('map').setView([22.584058, 88.340979], 6);
+        const map = L.map("map").setView([23, 80], 5);
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(map);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+            maxZoom: 18
+        }).addTo(map);
+
+        function toTime(mins) {
+            mins = mins % (24 * 60); // force inside 0–1439 range (24 hours)
+
+            let hr = Math.floor(mins / 60);
+            let mm = mins % 60;
+
+            return hr.toString().padStart(2, '0') + ":" + mm.toString().padStart(2, '0');
+        }
+
 
         function loadTrain() {
-            const trainNumber = document.getElementById("trainNo").value;
-            const journeyDate = document.getElementById("journeyDate").value;
+            let trainNo = document.getElementById("trainNo").value;
+            let date = document.getElementById("journeyDate").value;
 
-            fetch(`/api/train/${trainNumber}?journeyDate=${journeyDate}`)
+            if (!trainNo || !date) {
+                alert("Please enter train number and date!");
+                return;
+            }
+
+            fetch(`/api/train/${trainNo}?date=${date}`)
                 .then(res => res.json())
                 .then(data => {
-                    map.eachLayer((layer) => {
-                        if (layer instanceof L.Marker || layer instanceof L.Polyline) map.removeLayer(layer);
+
+                    map.eachLayer(layer => {
+                        if (layer instanceof L.Marker ||
+                            layer instanceof L.CircleMarker ||
+                            layer instanceof L.Polyline)
+                            map.removeLayer(layer);
                     });
 
-                    const stations = data.route;
-                    const routeCoords = [];
+                    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+                        maxZoom: 18
+                    }).addTo(map);
 
-                    stations.forEach(station => {
-                        const lat = parseFloat(station.lat);
-                        const lng = parseFloat(station.lng);
-                        routeCoords.push([lat, lng]);
+                    const globalDelay = data.delay; // global delay for all stations
 
-                        let popupText = `<b>${station.station_name}</b><br>
-                                 Arrival: ${Math.floor(station.std_min / 60)}:${station.std_min % 60}<br>
-                                 Platform: ${station.platform_number}<br>
-                                 Food: ${station.food_available}<br>
-                                 Hotel: ${station.hotel_available}<br>
-                                 Hospital: ${station.hospital_available}`;
+                    const coords = [];
+                    let currentStationLatLng = null;
+                    let nextStationLatLng = null;
 
-                        L.marker([lat, lng]).addTo(map).bindPopup(popupText);
+                    // ------------------ ALL STATION MARKERS ---------------------
+                    data.route.forEach(st => {
+                        if (st.lat && st.lng) {
+                            const lat = parseFloat(st.lat);
+                            const lng = parseFloat(st.lng);
+
+                            coords.push([lat, lng]);
+
+                            // scheduled arrival
+                            const scheduled = toTime(parseInt(st.std_min));
+
+                            // expected arrival = scheduled + global train delay
+                            let schedMins = parseInt(st.std_min);
+                            let expMins = schedMins + globalDelay;
+                            const expected = toTime(expMins);
+
+                            // small markers with popup
+                            L.circleMarker([lat, lng], {
+                                radius: 4,
+                                color: "#444",
+                                fillColor: "#777",
+                                fillOpacity: 0.9
+                            }).addTo(map).bindPopup(`
+                                <b>${st.station_name}</b><br>
+                                <b>Scheduled Arrival:</b> ${scheduled}<br>
+                                <b>Expected Arrival:</b> ${expected}<br>
+                                <b>Delay:</b> ${globalDelay} mins<br>
+                                <hr>
+                                <b>Facilities</b><br>
+                                Food: ${st.food_available}<br>
+                                Hotel: ${st.hotel_available}<br>
+                                Hospital: ${st.hospital_available}
+                            `);
+
+                            // current station
+                            if (st.station_name.toUpperCase() === data.currentStation.toUpperCase()) {
+                                currentStationLatLng = [lat, lng];
+                            }
+
+                            // next station
+                            if (data.nextStoppage &&
+                                data.nextStoppage.next_stoppage &&
+                                st.station_name.toUpperCase()
+                                === data.nextStoppage.next_stoppage.toUpperCase()) {
+
+                                nextStationLatLng = [lat, lng];
+                            }
+                        }
                     });
 
-                    L.polyline(routeCoords, { color: 'blue' }).addTo(map);
+                    // draw route line
+                    if (coords.length > 1)
+                        L.polyline(coords, { color: "blue", weight: 5 }).addTo(map);
 
-                    const currentStation = stations.find(s => s.station_name === data.currentStation);
-                    if (currentStation) {
-                        L.circleMarker([currentStation.lat, currentStation.lng], { color: 'red', radius: 8 })
+                    // ------------------ CURRENT STATION CARD ---------------------
+                    document.getElementById("currentCard").innerHTML = `
+                        <b>Current Station:</b> ${data.currentStation}<br>
+                        ETA: ${data.eta}<br>
+                        Delay: ${data.delay} mins
+                    `;
+
+                    // highlight current station marker
+                    if (currentStationLatLng) {
+                        L.circleMarker(currentStationLatLng, {
+                            color: "red",
+                            radius: 10,
+                            weight: 3
+                        })
                             .addTo(map)
-                            .bindPopup(`<b>Current Station: ${data.currentStation}</b><br>
-                                Next: ${data.nextStation}<br>
-                                ETA: ${data.etaNextStation}`)
+                            .bindPopup(`<b>${data.currentStation}</b><br>Delay: ${data.delay} mins`)
                             .openPopup();
+
+                        map.setView(currentStationLatLng, 10);
                     }
+
+                    // ------------------ NEXT STATION CARD & MARKER ---------------------
+                    const next = data.nextStoppage;
+                    if (next && nextStationLatLng) {
+
+                        L.marker(nextStationLatLng)
+                            .addTo(map)
+                            .bindPopup(`<b>${next.next_stoppage}</b>`);
+
+                        document.getElementById("nextCard").innerHTML = `
+                            <b>Next Station:</b> ${next.next_stoppage}<br>
+                            Arrival In: ${next.next_stoppage_time_diff}<br>
+                            Delay: ${next.next_stoppage_delay} mins
+                        `;
+                    }
+
                 });
         }
     </script>
+
 </body>
 
 </html>
